@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 import typing
 
@@ -141,16 +142,26 @@ class Step(base.StepBase):
 
         self._inside_parallel = True
 
-        outputs = tuple[types.T]()
-        responses: list[execution.StepResponse] = []
-        for cb in callables:
+        async def run_callable(cb):
             try:
                 output = await cb()
-                outputs = (*outputs, output)
+                return ("output", output)
             except base.ResponseInterrupt as interrupt:
-                responses = [*responses, *interrupt.responses]
+                return ("responses", interrupt.responses)
             except base.SkipInterrupt:
-                pass
+                return ("interrupt", None)
+
+        outputs = tuple[types.T]()
+        responses: list[execution.StepResponse] = []
+        results = await asyncio.gather(*[run_callable(cb) for cb in callables])
+        for result in results:
+            match result[0]:
+                case "output":
+                    outputs = (*outputs, result[1])
+                case "responses":
+                    responses = [*responses, *result[1]]
+                case "interrupt":
+                    pass
 
         if len(responses) > 0:
             raise base.ResponseInterrupt(responses)
